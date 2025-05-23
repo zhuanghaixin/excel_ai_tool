@@ -231,8 +231,8 @@ def get_excel_file():
 def load_config():
     """加载配置，包括环境变量和配置文件"""
     config = {
-        'deepseek_key': 'sk-ebb7d2c79ec24a63951186dba80e8ee0',
-        'deepseek_url': 'https://api.deepseek.com',
+        'deepseek_key': 'sk-046f9a67ae18418781fb4adcaa524078',
+        'deepseek_url': 'https://api.deepseek.com',  # 根据官方文档修正URL
         'baidu_appid': None,
         'baidu_key': None
     }
@@ -245,8 +245,10 @@ def load_config():
             print(f"加载.env文件时出错: {e}")
     
     # 2. 从环境变量读取配置
-    config['deepseek_key'] = os.environ.get('DEEPSEEK_API_KEY')
-    config['deepseek_url'] = os.environ.get('DEEPSEEK_API_URL')
+    if os.environ.get('DEEPSEEK_API_KEY'):
+        config['deepseek_key'] = os.environ.get('DEEPSEEK_API_KEY')
+    if os.environ.get('DEEPSEEK_API_URL'):
+        config['deepseek_url'] = os.environ.get('DEEPSEEK_API_URL')
     config['baidu_appid'] = os.environ.get('BAIDU_API_ID')
     config['baidu_key'] = os.environ.get('BAIDU_API_KEY')
     
@@ -266,13 +268,13 @@ def load_config():
                         config_parser.read(path)
                         if 'api' in config_parser:
                             api_section = config_parser['api']
-                            if not config['deepseek_key'] and 'deepseek_key' in api_section:
+                            if 'deepseek_key' in api_section:
                                 config['deepseek_key'] = api_section.get('deepseek_key')
-                            if not config['deepseek_url'] and 'deepseek_url' in api_section:
+                            if 'deepseek_url' in api_section:
                                 config['deepseek_url'] = api_section.get('deepseek_url')
-                            if not config['baidu_appid'] and 'baidu_appid' in api_section:
+                            if 'baidu_appid' in api_section:
                                 config['baidu_appid'] = api_section.get('baidu_appid')
-                            if not config['baidu_key'] and 'baidu_key' in api_section:
+                            if 'baidu_key' in api_section:
                                 config['baidu_key'] = api_section.get('baidu_key')
                         break
                     except Exception as e:
@@ -593,10 +595,14 @@ def translate_excel_file(input_path, translators, zh_to_en_indices, en_to_zh_ind
     # 创建一个新的DataFrame用于保存结果
     result_df = pd.DataFrame()
     
+    # 记录已经添加的列数，用于确保新列插入到正确位置
+    added_columns = 0
+    
     # 遍历所有列，如果是需要翻译的列，则添加原列和翻译列；否则只添加原列
     for i, col in enumerate(original_columns):
         # 添加原始列
-        result_df[col] = df[col]
+        col_index = i + added_columns
+        result_df.insert(col_index, col, df[col])
         
         # 如果当前列需要中文→英文翻译
         if col in zh_to_en_columns:
@@ -612,8 +618,9 @@ def translate_excel_file(input_path, translators, zh_to_en_indices, en_to_zh_ind
                 else:
                     new_col_data.append("")
             
-            # 添加翻译列
-            result_df[new_col] = new_col_data
+            # 添加翻译列，紧跟在原列后面
+            added_columns += 1
+            result_df.insert(col_index + 1, new_col, new_col_data)
         
         # 如果当前列需要英文→中文翻译
         elif col in en_to_zh_columns:
@@ -629,8 +636,9 @@ def translate_excel_file(input_path, translators, zh_to_en_indices, en_to_zh_ind
                 else:
                     new_col_data.append("")
             
-            # 添加翻译列
-            result_df[new_col] = new_col_data
+            # 添加翻译列，紧跟在原列后面
+            added_columns += 1
+            result_df.insert(col_index + 1, new_col, new_col_data)
     
     # 保存为新的Excel文件
     print(f"\n保存翻译结果到 {output_path}")
@@ -787,13 +795,18 @@ def translate_via_csv(input_path, translators, zh_to_en_indices, en_to_zh_indice
         reader = csv.DictReader(input_file)
         all_columns = reader.fieldnames.copy()
         
-        # 添加新列：为每个翻译列添加对应的结果列
-        for col in zh_to_en_columns:
-            all_columns.append(f"{col}_en")
-        for col in en_to_zh_columns:
-            all_columns.append(f"{col}_zh")
+        # 创建新的列顺序，确保翻译列紧跟在原始列后面
+        new_columns = []
+        for col_name in all_columns:
+            new_columns.append(col_name)
+            # 如果当前列需要中文→英文翻译，在它后面添加对应的翻译列
+            if col_name in zh_to_en_columns:
+                new_columns.append(f"{col_name}_en")
+            # 如果当前列需要英文→中文翻译，在它后面添加对应的翻译列
+            elif col_name in en_to_zh_columns:
+                new_columns.append(f"{col_name}_zh")
         
-        writer = csv.DictWriter(output_file, fieldnames=all_columns)
+        writer = csv.DictWriter(output_file, fieldnames=new_columns)
         writer.writeheader()
         
         # 逐行处理数据
@@ -957,7 +970,7 @@ def main():
             config = configparser.ConfigParser()
             config['api'] = {
                 'deepseek_key': 'YOUR_DEEPSEEK_API_KEY',
-                'deepseek_url': 'https://api.deepseek.com/v1/chat/completions',
+                'deepseek_url': 'https://api.deepseek.com',
                 'baidu_appid': 'YOUR_BAIDU_API_ID',
                 'baidu_key': 'YOUR_BAIDU_API_KEY'
             }
@@ -1108,10 +1121,15 @@ class DeepSeekTranslator:
         self.source = source
         self.target = target
         self.api_key = api_key
-        self.api_url = api_url or "https://api.deepseek.com/v1/chat/completions"  # 替换为实际的 API 端点
+        # 根据官方文档修正URL
+        base_url = api_url or "https://api.deepseek.com"
+        # 确保URL末尾不包含斜杠，然后添加端点路径
+        if base_url.endswith('/'):
+            base_url = base_url[:-1]
+        self.api_url = f"{base_url}/chat/completions"
         
     def translate(self, text):
-        """使用 DeepSeek-V3 API 翻译文本"""
+        """使用 DeepSeek API 翻译文本"""
         if not text.strip():
             return ""
             
@@ -1124,8 +1142,14 @@ class DeepSeekTranslator:
                 "Authorization": f"Bearer {self.api_key}"
             }
             
+            # 打印请求信息用于调试
+            print(f"\n正在请求DeepSeek API: {self.api_url}")
+            print(f"源语言: {source_lang}, 目标语言: {target_lang}")
+            print(f"API密钥前4位: {self.api_key[:4] if self.api_key and len(self.api_key) > 4 else '未提供'}")
+            
+            # 使用官方推荐的模型名称
             payload = {
-                "model": "deepseek-v3",  # 使用 DeepSeek-V3 模型
+                "model": "deepseek-chat",  # 根据文档，已全面升级为DeepSeek-V3
                 "messages": [
                     {"role": "system", "content": f"你是一个专业翻译助手。请将下面的{source_lang}文本翻译成{target_lang}，只返回翻译结果，不要有任何解释或额外文字。"},
                     {"role": "user", "content": text}
@@ -1133,15 +1157,26 @@ class DeepSeekTranslator:
                 "temperature": 0.3  # 使用较低的温度提高翻译一致性
             }
             
-            response = requests.post(self.api_url, headers=headers, data=json.dumps(payload))
-            
-            if response.status_code == 200:
-                result = response.json()
-                translation = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return translation
-            else:
-                print(f"翻译API错误 (代码: {response.status_code}): {response.text}")
-                return text  # 失败时返回原文本
+            # 尝试调用API
+            try:
+                response = requests.post(self.api_url, headers=headers, json=payload)
+                print(f"API响应状态码: {response.status_code}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    translation = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    return translation
+                else:
+                    print(f"翻译API错误 (代码: {response.status_code}): {response.text}")
+                    print(f"\n请检查以下内容:")
+                    print(f"1. API密钥是否正确")
+                    print(f"2. API URL是否正确 ({self.api_url})")
+                    print(f"3. 您的DeepSeek账户是否有效，以及是否有调用此API的权限")
+                    print(f"4. 网络连接是否正常")
+                    return text  # 失败时返回原文本
+            except Exception as e:
+                print(f"API请求出错: {str(e)}")
+                return text
                 
         except Exception as e:
             print(f"翻译过程中出错: {str(e)}")
